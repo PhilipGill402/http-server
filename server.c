@@ -8,6 +8,16 @@
 #define PORT 8080
 #define MAX_SIZE 1024
 
+char* generate_response(char* code){
+    char* buffer = malloc(MAX_SIZE); 
+    int c = snprintf(buffer, MAX_SIZE, "HTTP/1.1 %s\r\nContent-Type: text/plain\r\nContent-Length: 6\r\n\r\nHello\n", code);
+    if (c < 0){
+        perror("response");
+        return NULL;
+    }
+    return buffer;
+}
+
 int main(){
     int server_fd;
     struct sockaddr_in server_addr;
@@ -61,9 +71,16 @@ int main(){
         char* protocol = strtok(NULL, " ");
         printf("Protocol: %s\n", protocol);
 
-        FILE* file = fopen(path, "w");
+        FILE* file = fopen(path, "r");
+        char* code = "200 OK"; 
         if (file == NULL){
-            write(client_fd, "404 Error: File Not Found\n", 26);
+            code = "404 Not Found"; 
+        }
+        printf("%s", code);
+        char* response = generate_response(code);
+        if (response){
+            write(client_fd, response, strlen(response));
+            free(response);
         }
     }
      
