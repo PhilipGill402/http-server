@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <netinet/in.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -8,13 +9,45 @@
 #define PORT 8080
 #define MAX_SIZE 1024
 
-char* generate_response(char* code){
-    char* buffer = malloc(MAX_SIZE); 
-    int c = snprintf(buffer, MAX_SIZE, "HTTP/1.1 %s\r\nContent-Type: text/plain\r\nContent-Length: 6\r\n\r\nHello\n", code);
+char* generate_response(char* path){
+    char* buffer = malloc(MAX_SIZE);
+    struct stat st;
+    
+    size_t file_size = 0; 
+    if (stat(path, &st) == 0) {
+        size_t file_size = st.st_size;
+    }
+
+    //open the file
+    FILE* file = fopen(path, "r");
+    
+    //assign correct code
+    int code = 200;
+    char* response_code = "200 OK";
+    if (file == NULL){
+        code = 404; 
+        response_code = "404 File Not Found";
+    }
+         
+    printf("Code: %d\n", code);
+    
+    //gets contents of the file
+    
+    char* html = malloc(file_size);
+    if (code == 200) {
+        fread(html, 1, file_size, file); 
+    }
+
+    printf("Length: %d\n", (int) file_size);
+
+    int c = snprintf(buffer, MAX_SIZE, "HTTP/1.1 %s\r\nContent-Type: text/plain\r\nContent-Length: %d\r\n\r\n %s", response_code, (int) file_size, html);
+    free(html);
+
     if (c < 0){
         perror("response");
         return NULL;
     }
+    
     return buffer;
 }
 
@@ -31,7 +64,9 @@ int main(){
         return -1;
     }
     
-    
+    int opt = 1;
+    setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+
     server_addr.sin_family = AF_INET;
     server_addr.sin_addr.s_addr = INADDR_ANY;
     server_addr.sin_port = htons(PORT);
@@ -66,18 +101,20 @@ int main(){
         printf("HTTP Method: %s\n", method);
 
         char* path = strtok(NULL, " ");
+        //we must remove the '/' from the path to be able to open it
+        if (path[0] == '/') {
+            path++;
+        }
         printf("Path: %s\n", path);
+
         
         char* protocol = strtok(NULL, " ");
         printf("Protocol: %s\n", protocol);
 
-        FILE* file = fopen(path, "r");
-        char* code = "200 OK"; 
-        if (file == NULL){
-            code = "404 Not Found"; 
-        }
-        printf("%s", code);
-        char* response = generate_response(code);
+        
+        
+
+        char* response = generate_response(path);
         if (response){
             write(client_fd, response, strlen(response));
             free(response);
@@ -86,6 +123,5 @@ int main(){
      
     close(client_fd);
     close(server_fd);
-    printf("Hello World\n");
     return 0;
 }
