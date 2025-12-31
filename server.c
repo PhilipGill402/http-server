@@ -9,39 +9,80 @@
 #define PORT 8080
 #define MAX_SIZE 1024
 
-char* generate_response(char* path){
-    char* buffer = malloc(MAX_SIZE);
+typedef struct response_t {
+    char* html;
+    int code;
+    long long size;
+} response_t;
+
+void get_404_info(response_t* response) {
+    struct stat st;
+    long long file_size = 0;
+    if (stat("404.html", &st) == 0) {
+        file_size = (long long)st.st_size;
+    } else {
+        perror("file size");
+        return;
+    }
+    
+    char* html = malloc(file_size);
+    FILE* file = fopen("404.html", "r");
+    fread(html, sizeof(char), file_size, file);
+    
+    fclose(file);
+
+
+    response->code = 404;
+    response->size = file_size;
+    response->html = html;
+}
+
+void get_response_info(response_t* response, char* path) {
     struct stat st;
     
-    size_t file_size = 0; 
+    long long file_size = 0; 
     if (stat(path, &st) == 0) {
-        size_t file_size = st.st_size;
+        file_size = (long long)st.st_size;
+    } else {
+        get_404_info(response);
+        return;
     }
+
+    response->size = file_size;
 
     //open the file
     FILE* file = fopen(path, "r");
     
     //assign correct code
-    int code = 200;
-    char* response_code = "200 OK";
-    if (file == NULL){
-        code = 404; 
-        response_code = "404 File Not Found";
-    }
-         
-    printf("Code: %d\n", code);
-    
-    //gets contents of the file
-    
+    response->code = 200;
+
+    //gets contents of the file (if file was not found then get contents of '404.html')
     char* html = malloc(file_size);
-    if (code == 200) {
-        fread(html, 1, file_size, file); 
+    response->html = malloc(file_size);
+    fread(html, sizeof(char), file_size, file);
+    strcpy(response->html, html);
+    
+    //cleanup
+    free(html);
+    html = NULL;
+    fclose(file);
+}
+
+char* generate_response(const response_t* response){
+    char* buffer = malloc(MAX_SIZE);
+
+    char response_code[MAX_SIZE];
+
+    switch(response->code) {
+        case 200:
+            strcpy(response_code, "200 OK\0");
+            break;
+        default:
+            strcpy(response_code, "404 Not Found\0");
+            break;
     }
 
-    printf("Length: %d\n", (int) file_size);
-
-    int c = snprintf(buffer, MAX_SIZE, "HTTP/1.1 %s\r\nContent-Type: text/plain\r\nContent-Length: %d\r\n\r\n %s", response_code, (int) file_size, html);
-    free(html);
+    int c = snprintf(buffer, MAX_SIZE, "HTTP/1.1 %s\r\nContent-Type: text/html; charset=UTF8\r\nContent-Length: %d\r\nConnection: close\r\n\r\n %s", response_code, (int) response->size, response->html);
 
     if (c < 0){
         perror("response");
@@ -68,7 +109,7 @@ int main(){
     setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
 
     server_addr.sin_family = AF_INET;
-    server_addr.sin_addr.s_addr = INADDR_ANY;
+    server_addr.sin_addr.s_addr = htonl(INADDR_ANY);
     server_addr.sin_port = htons(PORT);
 
     if (bind(server_fd, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0){
@@ -102,8 +143,10 @@ int main(){
 
         char* path = strtok(NULL, " ");
         //we must remove the '/' from the path to be able to open it
-        if (path[0] == '/') {
+        if (path[0] == '/' && path[1] != '\0') {
             path++;
+        } else if (path[0] == '/') {
+            strcpy(path, "index.html");
         }
         printf("Path: %s\n", path);
 
@@ -113,12 +156,26 @@ int main(){
 
         
         
+        response_t* response = malloc(sizeof(response_t));
+        get_response_info(response, path);
 
-        char* response = generate_response(path);
-        if (response){
-            write(client_fd, response, strlen(response));
-            free(response);
+        printf("Code: %d\n", response->code);
+        printf("Size: %d\n", (int)response->size);
+        printf("HTML: %s\n", response->html);
+
+        char* response_buffer = generate_response(response);
+        printf("Response: %s\n", response_buffer);
+
+        if (response_buffer){
+            write(client_fd, response_buffer, strlen(response_buffer));
+            
         }
+        
+        free(response->html);
+        free(response_buffer);
+        free(response);
+        response_buffer = NULL;
+        response = NULL;
     }
      
     close(client_fd);
